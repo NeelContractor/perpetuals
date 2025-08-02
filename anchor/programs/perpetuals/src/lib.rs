@@ -19,6 +19,7 @@ const MAX_PRICE_AGE: u64 = 60; // 60 seconds max age for price
 pub mod perpetuals {
     use super::*;
 
+    //admin instructions
     pub fn initialize(ctx: Context<Initialize>, min_signatures: u8, admins: Vec<Pubkey>) -> Result<()> {
         let perpetuals = &mut ctx.accounts.perpetuals;
         perpetuals.permissions = Permissions {
@@ -40,6 +41,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //admin instructions
     pub fn add_pool(ctx: Context<AddPool>, name: String) -> Result<()> {
         require!(name.len() <= 64, PerpError::InvalidPoolName);
 
@@ -58,12 +60,13 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //admin instructions
     pub fn add_custody(ctx: Context<AddCustody>, is_stable: bool, oracle_type: OracleType, initial_price: u64) -> Result<()> {
         require!(initial_price > 0, PerpError::InvalidPrice);
 
         let custody = &mut ctx.accounts.custody;
         custody.pool = ctx.accounts.pool.key();
-        custody.mint = ctx.accounts.custody_token_account.key();
+        custody.mint = ctx.accounts.custody_token_mint.key();
         custody.decimals = ctx.accounts.custody_token_mint.decimals;
         custody.is_stable = is_stable;
         custody.oracle = Pubkey::default();
@@ -135,6 +138,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //admin instructions
     pub fn update_price(ctx: Context<UpdatePrice>, new_price: u64) -> Result<()> {
         require!(new_price > 0, PerpError::InvalidPrice);
 
@@ -154,6 +158,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn add_liquidity(ctx: Context<AddLiquidity>, amount_in: u64, min_lp_amount_out: u64) -> Result<()> {
         require!(amount_in > 0, PerpError::InvalidAmount);
         require!(ctx.accounts.perpetuals.permissions.allow_add_liquidity, PerpError::ActionNotAllowed);
@@ -220,6 +225,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, lp_amount_in: u64, min_amount_out: u64) -> Result<()> {
         require!(lp_amount_in > 0, PerpError::InvalidAmount);
         require!(ctx.accounts.perpetuals.permissions.allow_remove_liquidity, PerpError::ActionNotAllowed);
@@ -251,20 +257,22 @@ pub mod perpetuals {
         let burn_ctx = CpiContext::new(cpi_program, burn_accounts);
         burn(burn_ctx, lp_amount_in)?;
 
-        // Transfer tokens from custody to user
-        let pool_seeds = &[
-            b"pool".as_ref(),
-            pool.name.as_bytes(),
-            &[pool.bump],
+        // Transfer tokens from custody to user - FIX: Use custody as authority
+        let pool_key = pool.key();
+        let custody_seeds = &[
+            b"custody".as_ref(),
+            pool_key.as_ref(),
+            custody.mint.as_ref(),
+            &[custody.bump],
         ];
-        let signer = &[&pool_seeds[..]];
+        let signer = &[&custody_seeds[..]];
 
         let transfer_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
                 from: ctx.accounts.custody_token_account.to_account_info(),
                 to: ctx.accounts.receiving_account.to_account_info(),
-                authority: ctx.accounts.pool.to_account_info(),
+                authority: ctx.accounts.custody.to_account_info(),
             },
             signer,
         );
@@ -279,6 +287,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn open_position(ctx: Context<OpenPosition>, side: Side, collateral_amount: u64, leverage: u64, acceptable_price: u64) -> Result<()> {
         require!(leverage > 0 && leverage <= MAX_LEVERAGE as u64, PerpError::InvalidLeverage);
         require!(collateral_amount >= MIN_COLLATERAL_SOL, PerpError::InvalidCollateralAmount);
@@ -316,10 +325,14 @@ pub mod perpetuals {
             .ok_or(PerpError::MathOverflow)?;
 
         // Transfer collateral + fee from user (SOL)
-        let lamports_to_transfer = total_collateral_needed;
-        
-        **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? -= lamports_to_transfer;
-        **ctx.accounts.custody_token_account.to_account_info().try_borrow_mut_lamports()? += lamports_to_transfer;
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.collateral_account.to_account_info(),
+            to: ctx.accounts.custody_token_account.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info()
+        };
+        let transfer_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        transfer(transfer_ctx, total_collateral_needed)?;
 
         // Update custody
         let custody = &mut ctx.accounts.custody;
@@ -361,6 +374,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn close_position(ctx: Context<ClosePosition>) -> Result<()> {
         require!(ctx.accounts.perpetuals.permissions.allow_close_position, PerpError::ActionNotAllowed);
         
@@ -394,14 +408,32 @@ pub mod perpetuals {
 
         transfer_amount = transfer_amount.saturating_sub(closing_fee);
 
-        // Get custody balance (SOL lamports)
-        let custody_balance = ctx.accounts.custody_token_account.get_lamports();
+        // Get custody balance
+        let custody_balance = ctx.accounts.custody_token_account.amount;
         transfer_amount = transfer_amount.min(custody_balance);
 
-        // Transfer SOL to user if amount > 0
+        // Transfer tokens to user if amount > 0 - FIX: Use custody as authority
+        let pool_key = ctx.accounts.pool.key();
+        let mint_key = ctx.accounts.mint.key();
         if transfer_amount > 0 {
-            **ctx.accounts.custody_token_account.to_account_info().try_borrow_mut_lamports()? -= transfer_amount;
-            **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += transfer_amount;
+            let custody_seeds = &[
+                b"custody".as_ref(),
+                pool_key.as_ref(),
+                mint_key.as_ref(),
+                &[ctx.accounts.custody.bump],
+            ];
+            let signer = &[&custody_seeds[..]];
+
+            let transfer_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.custody_token_account.to_account_info(),
+                    to: ctx.accounts.receiving_account.to_account_info(),
+                    authority: ctx.accounts.custody.to_account_info(),
+                },
+                signer,
+            );
+            token::transfer(transfer_ctx, transfer_amount)?;
         }
 
         // Update custody
@@ -426,6 +458,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn liquidate_position(ctx: Context<LiquidatePosition>) -> Result<()> {
         let clock = Clock::get()?;
         let current_price = get_oracle_price(
@@ -462,16 +495,52 @@ pub mod perpetuals {
         );
         let user_amount = remaining_collateral.saturating_sub(liquidation_fee);
 
-        // Transfer liquidation fee to liquidator (SOL)
+        // Transfer liquidation fee to liquidator - FIX: Use custody as authority
+        let pool_key = ctx.accounts.pool.key();
+        let mint_key = ctx.accounts.mint.key();
         if liquidation_fee > 0 {
-            **ctx.accounts.custody_token_account.to_account_info().try_borrow_mut_lamports()? -= liquidation_fee;
-            **ctx.accounts.liquidator.to_account_info().try_borrow_mut_lamports()? += liquidation_fee;
+            let custody_seeds = &[
+                b"custody".as_ref(),
+                pool_key.as_ref(),
+                mint_key.as_ref(),
+                &[ctx.accounts.custody.bump],
+            ];
+            let signer = &[&custody_seeds[..]];
+
+            let transfer_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.custody_token_account.to_account_info(),
+                    to: ctx.accounts.liquidator_account.to_account_info(),
+                    authority: ctx.accounts.custody.to_account_info(),
+                },
+                signer,
+            );
+            token::transfer(transfer_ctx, liquidation_fee)?;
         }
 
-        // Transfer remaining amount to position owner (SOL)
+        // Transfer remaining amount to position owner - FIX: Use custody as authority
+        let pool_key = ctx.accounts.pool.key();
+        let mint_key = ctx.accounts.mint.key();
         if user_amount > 0 {
-            **ctx.accounts.custody_token_account.to_account_info().try_borrow_mut_lamports()? -= user_amount;
-            **ctx.accounts.position_owner.to_account_info().try_borrow_mut_lamports()? += user_amount;
+            let custody_seeds = &[
+                b"custody".as_ref(),
+                pool_key.as_ref(),
+                mint_key.as_ref(),
+                &[ctx.accounts.custody.bump],
+            ];
+            let signer = &[&custody_seeds[..]];
+
+            let transfer_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.custody_token_account.to_account_info(),
+                    to: ctx.accounts.position_owner_account.to_account_info(),
+                    authority: ctx.accounts.custody.to_account_info(),
+                },
+                signer,
+            );
+            token::transfer(transfer_ctx, user_amount)?;
         }
 
         // Update custody
@@ -493,6 +562,7 @@ pub mod perpetuals {
         Ok(())
     }
 
+    //public instructions
     pub fn update_position(ctx: Context<UpdatePosition>) -> Result<()> {
         let clock = Clock::get()?;
         let current_price = get_oracle_price(
@@ -506,6 +576,9 @@ pub mod perpetuals {
         Ok(())
     }
 }
+
+// Account contexts remain the same until AddCustody...
+
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(mut)]
@@ -593,7 +666,7 @@ pub struct AddCustody<'info> {
         init,
         payer = authority,
         token::mint = custody_token_mint,
-        token::authority = custody,
+        token::authority = custody,  // FIX: custody is the authority
         seeds = [b"custody_token_account", pool.key().as_ref(), custody_token_mint.key().as_ref()],
         bump
     )]
@@ -787,9 +860,17 @@ pub struct OpenPosition<'info> {
     )]
     pub custody_token_account: Account<'info, TokenAccount>,
 
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = owner
+    )]
+    pub collateral_account: Account<'info, TokenAccount>,
+
     /// CHECK: Oracle account validation happens in instruction
     pub oracle_account: AccountInfo<'info>,
 
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
@@ -835,18 +916,23 @@ pub struct ClosePosition<'info> {
     )]
     pub custody_token_account: Account<'info, TokenAccount>,
 
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = owner
+    )]
+    pub receiving_account: Account<'info, TokenAccount>,
+
     /// CHECK: Oracle account validation happens in instruction
     pub oracle_account: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
 pub struct LiquidatePosition<'info> {
     #[account(mut)]
     pub liquidator: Signer<'info>,
-
-    /// CHECK: Position owner account
-    #[account(mut)]
-    pub position_owner: AccountInfo<'info>,
 
     #[account(
         mut,
@@ -878,8 +964,24 @@ pub struct LiquidatePosition<'info> {
     )]
     pub custody_token_account: Account<'info, TokenAccount>,
 
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = liquidator
+    )]
+    pub liquidator_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = position.owner
+    )]
+    pub position_owner_account: Account<'info, TokenAccount>,
+
     /// CHECK: Oracle account validation happens in instruction
     pub oracle_account: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]

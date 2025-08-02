@@ -643,7 +643,15 @@ export type Perpetuals = {
           }
         },
         {
+          "name": "receivingAccount",
+          "writable": true
+        },
+        {
           "name": "oracleAccount"
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -724,10 +732,6 @@ export type Perpetuals = {
           "name": "liquidator",
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "positionOwner",
-          "writable": true
         },
         {
           "name": "position",
@@ -858,7 +862,19 @@ export type Perpetuals = {
           }
         },
         {
+          "name": "liquidatorAccount",
+          "writable": true
+        },
+        {
+          "name": "positionOwnerAccount",
+          "writable": true
+        },
+        {
           "name": "oracleAccount"
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -1031,7 +1047,15 @@ export type Perpetuals = {
           }
         },
         {
+          "name": "collateralAccount",
+          "writable": true
+        },
+        {
           "name": "oracleAccount"
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "systemProgram",

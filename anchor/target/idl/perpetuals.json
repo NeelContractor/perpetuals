@@ -637,7 +637,15 @@
           }
         },
         {
+          "name": "receiving_account",
+          "writable": true
+        },
+        {
           "name": "oracle_account"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -718,10 +726,6 @@
           "name": "liquidator",
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "position_owner",
-          "writable": true
         },
         {
           "name": "position",
@@ -852,7 +856,19 @@
           }
         },
         {
+          "name": "liquidator_account",
+          "writable": true
+        },
+        {
+          "name": "position_owner_account",
+          "writable": true
+        },
+        {
           "name": "oracle_account"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []
@@ -1025,7 +1041,15 @@
           }
         },
         {
+          "name": "collateral_account",
+          "writable": true
+        },
+        {
           "name": "oracle_account"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "system_program",
