@@ -280,9 +280,10 @@ pub mod perpetuals {
 
         // Update custody assets
         let custody_mut = &mut ctx.accounts.custody;
-        custody_mut.assets.owned = custody_mut.assets.owned.checked_sub(gross_amount_out).ok_or(PerpError::MathOverflow)?;
+        custody_mut.assets.owned = custody_mut.assets.owned.saturating_sub(gross_amount_out);
         custody_mut.assets.protocol_fees = custody_mut.assets.protocol_fees.checked_add(fee_amount).ok_or(PerpError::MathOverflow)?;
         custody_mut.volume_stats.remove_liquidity_usd = custody_mut.volume_stats.remove_liquidity_usd.checked_add(gross_amount_out as u128).ok_or(PerpError::MathOverflow)?;
+
 
         Ok(())
     }

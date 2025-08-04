@@ -1,5 +1,5 @@
-import { DashboardFeature } from '@/components/dashboard/dashboard-feature'
+import PerpetualsDashboard from '@/components/perpetuals/PerpetualsDashboard'
 
 export default function Home() {
-  return <DashboardFeature />
+  return <PerpetualsDashboard />
 }
